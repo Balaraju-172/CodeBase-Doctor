@@ -2,6 +2,8 @@
 
 Minimal Express server for AI Codebase Doctor. The current backend provides only a health check; it does not connect to a database, GitHub, or an AI service.
 
+The Express entry point is `server.js`. The `src` directory contains folders for routes, controllers, utilities, and database-related code as the backend grows.
+
 ## Run locally
 
 From this directory:
