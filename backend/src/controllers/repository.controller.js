@@ -1,3 +1,5 @@
+import { analyzeCode } from '../utils/codeAnalyzer.js';
+
 export const connectRepository = (req, res) => {
   try {
     const { repoUrl } = req.body;
@@ -52,7 +54,7 @@ export const connectRepository = (req, res) => {
 
 
 
-
+// Get repository details from GitHub repository
 export const getRepositoryDetails = async (req, res) => {
   try {
     const { owner, repo } = req.params;
@@ -106,7 +108,7 @@ export const getRepositoryDetails = async (req, res) => {
 
 
 
-
+// Get repository tree from GitHub repository
 export const getRepositoryTree = async (req, res) => {
   try {
     const { owner, repo } = req.params;
@@ -189,7 +191,7 @@ export const getRepositoryTree = async (req, res) => {
 
 
 
-
+// Get file contnent from GitHub repository
 export const getFileContent = async (req, res) => {
   try {
     const { owner, repo } = req.params;
@@ -273,3 +275,195 @@ export const getFileContent = async (req, res) => {
   }
 };
 
+
+
+
+export const analyzeRepository = async (req, res) => {
+  try {
+    const { owner, repo } = req.params;
+
+    // Step 1: Get repository details and default branch
+    const repoResponse = await fetch(
+      `https://api.github.com/repos/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}`,
+      {
+        headers: {
+          Accept: 'application/vnd.github+json',
+           Authorization: `Bearer ${process.env.GITHUB_TOKEN}`
+        }
+      }
+    );
+
+    if (!repoResponse.ok) {
+
+      // Read the actual error returned by GitHub.
+      const errorBody = await repoResponse.text();
+
+      // Print status code and GitHub error in terminal.
+      console.log('GitHub Status:', repoResponse.status);
+      console.log('GitHub Error:', errorBody);
+
+      // Check GitHub API rate limit.
+      console.log(
+        'Remaining Requests:',
+        repoResponse.headers.get('x-ratelimit-remaining')
+      );
+
+      return res.status(repoResponse.status).json({
+        success: false,
+        message: 'Failed to fetch repository details',
+        error: errorBody
+      });
+    }
+
+    const repoData = await repoResponse.json();
+    const branch = repoData.default_branch;
+
+    // Step 2: Fetch repository tree
+    const treeResponse = await fetch(
+      `https://api.github.com/repos/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/git/trees/${encodeURIComponent(branch)}?recursive=1`,
+      {
+        headers: {
+          Accept: 'application/vnd.github+json',
+          Authorization: `Bearer ${process.env.GITHUB_TOKEN}`
+        }
+      }
+    );
+
+    if (!treeResponse.ok) {
+      // Read the actual error returned by GitHub.
+      const errorBody = await treeResponse.text();
+
+      // Print status code and GitHub error in terminal.
+      console.log('GitHub Status:', treeResponse.status);
+      console.log('GitHub Error:', errorBody);
+
+      // Check GitHub API rate limit.
+      console.log(
+        'Remaining Requests:',
+        treeResponse.headers.get('x-ratelimit-remaining')
+      );
+
+      return res.status(treeResponse.status).json({
+        success: false,
+        message: 'Failed to fetch repository tree',
+        error: errorBody
+      });
+    }
+
+    const treeData = await treeResponse.json();
+
+    // Step 3: Select supported source files
+    const supportedExtensions = ['.js', '.jsx', '.ts', '.tsx'];
+
+    const excludedFolders = [
+      'node_modules/',
+      'dist/',
+      'build/',
+      '.next/',
+      'coverage/'
+    ];
+
+    const selectedFiles = treeData.tree
+      .filter((item) => {
+        return (
+          item.type === 'blob' &&
+          supportedExtensions.some((ext) => item.path.endsWith(ext)) &&
+          !excludedFolders.some((folder) => item.path.startsWith(folder)) &&
+          item.size <= 1024 * 1024
+        );
+      })
+      .slice(0, 20);
+
+    // Step 4: Fetch and analyze each selected file
+    const fileResults = [];
+
+    for (const file of selectedFiles) {
+        console.log("file"+file.path)
+      const fileResponse = await fetch(
+        `https://api.github.com/repos/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/contents/${file.path
+          .split('/')
+          .map(encodeURIComponent)
+          .join('/')}`,
+        {
+          headers: {
+            Accept: 'application/vnd.github+json',
+            Authorization: `Bearer ${process.env.GITHUB_TOKEN}`
+          }
+        }
+      );
+
+        // Check whether GitHub successfully returned the file.
+      if (!fileResponse.ok) {
+      
+        // Print GitHub's HTTP status code (example: 403, 404).
+        console.log('GitHub Status:', fileResponse.status);
+      
+        // Print the actual error message returned by GitHub.
+        console.log('GitHub Error:', await fileResponse.text());
+      
+        // Skip this file and continue with the next file.
+        continue;
+      }
+      if (!fileResponse.ok) {
+        continue;
+      }
+
+      const fileData = await fileResponse.json();
+
+      if (
+        fileData.type !== 'file' ||
+        fileData.encoding !== 'base64' ||
+        !fileData.content
+      ) {
+        continue;
+      }
+
+      const content = Buffer
+        .from(fileData.content.replace(/\s/g, ''), 'base64')
+        .toString('utf-8');
+
+      const analysis = analyzeCode(content, file.path);
+
+      fileResults.push(analysis);
+    }
+
+    // Step 5: Calculate repository-level totals
+    const summary = fileResults.reduce(
+      (total, file) => {
+        total.functionsFound += file.functionsFound;
+        total.importsFound += file.importsFound;
+        total.exportsFound += file.exportsFound;
+        total.potentialIssues += file.potentialIssues.length;
+
+        return total;
+      },
+      {
+        functionsFound: 0,
+        importsFound: 0,
+        exportsFound: 0,
+        potentialIssues: 0
+      }
+    );
+
+    return res.status(200).json({
+      success: true,
+      message: 'Repository analysis completed',
+      data: {
+        repository: repoData.full_name,
+        branch,
+        analyzedFiles: fileResults.length,
+        selectedFiles: selectedFiles.length,
+        summary,
+        files: fileResults
+      }
+    });
+
+  } catch (error) {
+    console.error('Repository Analysis Error:', error);
+
+    return res.status(500).json({
+      success: false,
+      message: 'Internal server error'
+    });
+  }
+};

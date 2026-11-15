@@ -1,4 +1,6 @@
+import 'dotenv/config';
 import express from 'express';
+
 
 import dashboardRoutes from './src/routes/dashboard.routes.js';
 import repositoryRoutes from './src/routes/repository.routes.js';
