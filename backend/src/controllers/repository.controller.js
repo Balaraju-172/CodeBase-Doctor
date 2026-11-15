@@ -186,3 +186,90 @@ export const getRepositoryTree = async (req, res) => {
   }
 };
 
+
+
+
+
+export const getFileContent = async (req, res) => {
+  try {
+    const { owner, repo } = req.params;
+    const { path } = req.query;
+
+    // Validate file path
+    if (!path) {
+      return res.status(400).json({
+        success: false,
+        message: 'File path is required'
+      });
+    }
+
+    // Fetch file content from GitHub
+    const githubResponse = await fetch(
+      `https://api.github.com/repos/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/contents/${path
+        .split('/')
+        .map(encodeURIComponent)
+        .join('/')}`,
+      {
+        headers: {
+          Accept: 'application/vnd.github+json'
+        }
+      }
+    );
+
+    if (githubResponse.status === 404) {
+      return res.status(404).json({
+        success: false,
+        message: 'File not found'
+      });
+    }
+
+    if (!githubResponse.ok) {
+      return res.status(githubResponse.status).json({
+        success: false,
+        message: 'Failed to fetch file from GitHub'
+      });
+    }
+
+    const fileData = await githubResponse.json();
+
+    // Check whether the requested path is a file
+    if (Array.isArray(fileData) || fileData.type !== 'file') {
+      return res.status(400).json({
+        success: false,
+        message: 'The requested path is not a file'
+      });
+    }
+
+    // GitHub returns Base64 encoded content
+    if (!fileData.content || fileData.encoding !== 'base64') {
+      return res.status(415).json({
+        success: false,
+        message: 'File content is not available in supported format'
+      });
+    }
+
+    const content = Buffer
+      .from(fileData.content.replace(/\s/g, ''), 'base64')
+      .toString('utf-8');
+
+    return res.status(200).json({
+      success: true,
+      message: 'File content fetched successfully',
+      data: {
+        fileName: fileData.name,
+        path: fileData.path,
+        size: fileData.size,
+        content
+      }
+    });
+
+  } catch (error) {
+    console.error('Get File Content Error:', error);
+
+    return res.status(500).json({
+      success: false,
+      message: 'Internal server error'
+    });
+  }
+};
+
