@@ -103,3 +103,86 @@ export const getRepositoryDetails = async (req, res) => {
     });
   }
 };
+
+
+
+
+export const getRepositoryTree = async (req, res) => {
+  try {
+    const { owner, repo } = req.params;
+
+    // Step 1: Get repository details to find default branch
+    const repoResponse = await fetch(
+      `https://api.github.com/repos/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}`,
+      {
+        headers: {
+          Accept: 'application/vnd.github+json'
+        }
+      }
+    );
+
+    if (!repoResponse.ok) {
+      return res.status(repoResponse.status).json({
+        success: false,
+        message: 'Repository not found or GitHub request failed'
+      });
+    }
+
+    const repoData = await repoResponse.json();
+    const branch = repoData.default_branch;
+
+    // Step 2: Fetch complete repository tree
+    const treeResponse = await fetch(
+      `https://api.github.com/repos/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/git/trees/${encodeURIComponent(branch)}?recursive=1`,
+      {
+        headers: {
+          Accept: 'application/vnd.github+json'
+        }
+      }
+    );
+
+    if (!treeResponse.ok) {
+      return res.status(treeResponse.status).json({
+        success: false,
+        message: 'Failed to fetch repository tree'
+      });
+    }
+
+    const treeData = await treeResponse.json();
+
+    // Step 3: Convert GitHub types into simple file/folder types
+    const files = treeData.tree.map((item) => ({
+      path: item.path,
+      type: item.type === 'tree' ? 'folder' : 'file'
+    }));
+
+    const totalFiles = files.filter(
+      (item) => item.type === 'file'
+    ).length;
+
+    const totalFolders = files.filter(
+      (item) => item.type === 'folder'
+    ).length;
+
+    return res.status(200).json({
+      success: true,
+      message: 'Repository tree fetched successfully',
+      data: {
+        repository: repoData.full_name,
+        branch,
+        totalFiles,
+        totalFolders,
+        files
+      }
+    });
+
+  } catch (error) {
+    console.error('Repository Tree Error:', error);
+
+    return res.status(500).json({
+      success: false,
+      message: 'Internal server error'
+    });
+  }
+};
+
