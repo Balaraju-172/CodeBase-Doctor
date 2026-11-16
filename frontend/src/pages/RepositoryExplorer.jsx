@@ -678,11 +678,14 @@ export default function RepositoryExplorer() {
         {/* RIGHT: AI Code Chat */}
         {explanationOpen ? (
           <RepositoryChat
-            repositoryName={repositoryName}
-            selectedFile={selectedFile}
-            width={chatWidth}
-            onClose={() => setExplanationOpen(false)}
-          />
+                owner={owner}
+                repo={repo}
+                repositoryName={repositoryName}
+                selectedFile={selectedFile}
+                selectedFileContent={activeFile?.content || ''}
+                width={chatWidth}
+                onClose={() => setExplanationOpen(false)}
+        />
         ) : (
           <button
             className="reopen-explainer"

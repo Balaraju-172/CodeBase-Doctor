@@ -7,9 +7,12 @@ import { connectRepository,
                             getRepositoryDependencies
         } from '../controllers/repository.controller.js';
 
+import { chatWithRepository } from '../controllers/chat.controller.js';
+
 const router = express.Router();
 
 router.post('/connect', connectRepository);
+router.post('/:owner/:repo/chat', chatWithRepository);
 router.get('/:owner/:repo', getRepositoryDetails);
 router.get('/:owner/:repo/tree', getRepositoryTree);
 router.get('/:owner/:repo/files', getFileContent);

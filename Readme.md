@@ -45,3 +45,10 @@ Now you need to understand:
 - Which database models are involved?
 - Which frontend components need changes?
 - Will your changes affect other modules?
+
+
+- 1. Repository-aware AI Chat
+- 2. Project Architecture Analyzer
+- 3. Code Explanation
+- 4. Smart Bug Detection
+- 5. Code Quality Analyzer

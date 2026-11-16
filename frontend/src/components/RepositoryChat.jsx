@@ -9,44 +9,118 @@ import {
   Code2
 } from 'lucide-react';
 
+const API_BASE_URL =
+  import.meta.env.VITE_API_URL || 'http://localhost:3001';
+
 export default function RepositoryChat({
-   repositoryName,
+  owner,
+  repo,
+  repositoryName,
   selectedFile,
+  selectedFileContent,
   onClose,
   width = 360
 }) {
-  // Chat input
+  // Stores current input question
   const [question, setQuestion] = useState('');
 
-  // Conversation messages
+  // Stores conversation messages
   const [messages, setMessages] = useState([]);
 
-  // Handle sending a question
-  function handleSendMessage(event) {
+  // Tracks API loading state
+  const [isLoading, setIsLoading] = useState(false);
+
+  // Stores API errors
+  const [error, setError] = useState('');
+
+  // Send question to backend
+  async function handleSendMessage(event) {
     event.preventDefault();
 
-    if (!question.trim()) return;
+    const currentQuestion = question.trim();
 
-    // Add user's message to conversation
+    if (!currentQuestion || isLoading) return;
+
+    if (!owner || !repo) {
+      setError('Repository information is missing.');
+      return;
+    }
+
+    if (!selectedFile || !selectedFileContent) {
+      setError('Please select a file before asking questions.');
+      return;
+    }
+
+    // Keep previous conversation for follow-up questions
+    const history = messages.map((message) => ({
+      role: message.role,
+      content: message.content
+    }));
+
+    // Immediately display user's question
     setMessages((current) => [
       ...current,
       {
         role: 'user',
-        content: question.trim()
+        content: currentQuestion
       }
     ]);
 
     setQuestion('');
+    setError('');
+    setIsLoading(true);
+
+    try {
+      // Call backend chat API
+      const response = await fetch(
+        `${API_BASE_URL}/api/repositories/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/chat`,
+        {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json'
+          },
+          body: JSON.stringify({
+            question: currentQuestion,
+            selectedFile,
+            fileContent: selectedFileContent,
+            history
+          })
+        }
+      );
+
+      const result = await response.json();
+
+      // Handle backend errors
+      if (!response.ok || !result.success) {
+        throw new Error(
+          result.message || 'Unable to generate AI response'
+        );
+      }
+
+      // Display AI answer
+      setMessages((current) => [
+        ...current,
+        {
+          role: 'assistant',
+          content: result.data.answer
+        }
+      ]);
+
+    } catch (err) {
+      setError(err.message);
+    } finally {
+      setIsLoading(false);
+    }
   }
 
   return (
     <aside
-            className="explainer-pane repository-chat"
-            style={{
-              width: `${width}px`,
-              flex: `0 0 ${width}px`
-            }}
-        >
+      className="explainer-pane repository-chat"
+      style={{
+        width: `${width}px`,
+        flex: `0 0 ${width}px`
+      }}
+    >
 
       {/* Chat header */}
       <div className="explainer-header">
@@ -71,7 +145,7 @@ export default function RepositoryChat({
         </div>
 
         <span>
-          {selectedFile || 'Entire repository'}
+          {selectedFile || 'No file selected'}
         </span>
       </div>
 
@@ -87,34 +161,25 @@ export default function RepositoryChat({
             <h3>Ask about your codebase</h3>
 
             <p>
-              Ask questions about your repository,
-              code flow, functions, APIs and dependencies.
+              Ask questions about your selected file,
+              functions, APIs and dependencies.
             </p>
 
             <div className="chat-suggestions">
-              <button
-                onClick={() =>
-                  setQuestion('Explain the project architecture')
-                }
-              >
-                Explain project architecture
-              </button>
-
-              <button
-                onClick={() =>
-                  setQuestion('Explain the selected file')
-                }
-              >
-                Explain selected file
-              </button>
-
-              <button
-                onClick={() =>
-                  setQuestion('How does the frontend communicate with the backend?')
-                }
-              >
-                Explain frontend-backend flow
-              </button>
+              {[
+                'Explain this file',
+                'Explain the functions in this file',
+                'What does this code do?',
+                'How can I improve this code?'
+              ].map((suggestion) => (
+                <button
+                  key={suggestion}
+                  type="button"
+                  onClick={() => setQuestion(suggestion)}
+                >
+                  {suggestion}
+                </button>
+              ))}
             </div>
           </div>
         ) : (
@@ -126,18 +191,42 @@ export default function RepositoryChat({
               <div className="chat-message-icon">
                 {message.role === 'user'
                   ? <User size={15} />
-                  : <Bot size={15} />}
+                  : <Bot size={15} />
+                }
               </div>
 
               <div className="chat-message-content">
                 <strong>
-                  {message.role === 'user' ? 'You' : 'AI Assistant'}
+                  {message.role === 'user'
+                    ? 'You'
+                    : 'AI Assistant'}
                 </strong>
 
                 <p>{message.content}</p>
               </div>
             </div>
           ))
+        )}
+
+        {/* AI loading indicator */}
+        {isLoading && (
+          <div className="chat-message assistant">
+            <div className="chat-message-icon">
+              <Bot size={15} />
+            </div>
+
+            <div className="chat-message-content">
+              <strong>AI Assistant</strong>
+              <p>Analyzing your code...</p>
+            </div>
+          </div>
+        )}
+
+        {/* API error */}
+        {error && (
+          <p className="chat-error">
+            {error}
+          </p>
         )}
 
       </div>
@@ -158,13 +247,16 @@ export default function RepositoryChat({
           <textarea
             placeholder="Ask anything about your code..."
             value={question}
-            onChange={(event) => setQuestion(event.target.value)}
+            onChange={(event) =>
+              setQuestion(event.target.value)
+            }
             rows={2}
+            disabled={isLoading}
           />
 
           <button
             type="submit"
-            disabled={!question.trim()}
+            disabled={!question.trim() || isLoading}
             aria-label="Send message"
           >
             <Send size={16} />
@@ -172,7 +264,7 @@ export default function RepositoryChat({
         </div>
 
         <span className="chat-input-hint">
-          AI responses will be connected through the backend.
+          AI responses powered by OpenRouter.
         </span>
       </form>
 

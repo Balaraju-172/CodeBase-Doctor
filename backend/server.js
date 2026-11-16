@@ -1,7 +1,6 @@
 import 'dotenv/config';
 import express from 'express';
 import cors from 'cors';
-
 import dashboardRoutes from './src/routes/dashboard.routes.js';
 import repositoryRoutes from './src/routes/repository.routes.js';
 
@@ -19,6 +18,9 @@ const port = Number(process.env.PORT) || 3001;
 app.get('/health', (_request, response) => {
   response.json({ status: 'ok' });
 });
+
+
+app.use('/api/repositories', repositoryRoutes);
 
 app.use('/api/dashboard', dashboardRoutes);
 app.use('/api/repositories', repositoryRoutes);
