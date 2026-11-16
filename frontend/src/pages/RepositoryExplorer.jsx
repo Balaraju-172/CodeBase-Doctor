@@ -1,5 +1,5 @@
-
-import { useEffect, useState } from 'react';
+import RepositoryChat from '../components/RepositoryChat';
+import { useEffect, useState, useRef } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import "../styles.css";
 import {
@@ -25,6 +25,8 @@ import CodeViewer from '../components/CodeViewer';
 const API_BASE_URL =
   import.meta.env.VITE_API_URL || 'http://localhost:3001';
 
+
+  
 
 // Convert GitHub flat file paths into nested folders
 function buildFileTree(files) {
@@ -194,7 +196,31 @@ export default function RepositoryExplorer() {
   }, [owner, repo]);
 
 
-  // API 3: Fetch actual file content
+
+  const workspaceRef = useRef(null);
+  const [chatWidth, setChatWidth] = useState(360);
+  const [isResizing, setIsResizing] = useState(false);
+
+      const handleChatResize = (event) => {
+        if (!isResizing || !workspaceRef.current) return;
+      
+        const workspaceRight =
+          workspaceRef.current.getBoundingClientRect().right;
+      
+        const newWidth = workspaceRight - event.clientX;
+      
+        setChatWidth(Math.min(600, Math.max(260, newWidth)));
+      };
+
+      const stopChatResize = (event) => {
+        setIsResizing(false);
+      
+        if (event.currentTarget.hasPointerCapture(event.pointerId)) {
+          event.currentTarget.releasePointerCapture(event.pointerId);
+        }
+      };
+
+        // API 3: Fetch actual file content
   async function handleFileSelect(path) {
     console.log(`Fetching content for file: ${path}`);
     // Check whether file is already open
@@ -449,8 +475,7 @@ export default function RepositoryExplorer() {
       </div>
 
 
-      <div className="explorer-workspace">
-
+    <div className="explorer-workspace" ref={workspaceRef}>
         {/* LEFT: File explorer */}
         <aside className="explorer-files">
 
@@ -636,115 +661,35 @@ export default function RepositoryExplorer() {
 
         </section>
 
+        {explanationOpen && (
+                <div
+                  className={`chat-resize-handle ${isResizing ? 'resizing' : ''}`}
+                  onPointerDown={(event) => {
+                    event.currentTarget.setPointerCapture(event.pointerId);
+                    setIsResizing(true);
+                  }}
+                  onPointerMove={handleChatResize}
+                  onPointerUp={stopChatResize}
+                  onPointerCancel={stopChatResize}
+                />  
+        )}
 
-        {/* RIGHT: Explanation panel */}
+
+        {/* RIGHT: AI Code Chat */}
         {explanationOpen ? (
-          <aside className="explainer-pane">
-
-            <div className="explainer-header">
-              <div>
-                <Sparkles size={15} />
-                <span>CODE EXPLANATION</span>
-              </div>
-
-              <button
-                aria-label="Close explanation panel"
-                onClick={() => setExplanationOpen(false)}
-              >
-                <PanelRightClose size={15} />
-              </button>
-            </div>
-
-
-            <div className="explainer-content">
-
-              <div className="explain-file-icon">
-                <FileText size={17} />
-              </div>
-
-              <span className="eyebrow">
-                {details.type}
-              </span>
-
-              <h2>{fileName}</h2>
-
-              <span className="file-location">
-                {selectedFile || 'Select a file'}
-              </span>
-
-              <div className="explanation-callout">
-                <span>
-                  <WandSparkles size={14} />
-                  OVERVIEW
-                </span>
-
-                <p>{details.summary}</p>
-              </div>
-
-
-              <div className="explanation-section">
-                <h3>In this file</h3>
-
-                <div className="file-point">
-                  <span className="point-dot purple" />
-
-                  <p>
-                    <strong>
-                      {selectedFile
-                        ? `${lines.length} lines`
-                        : 'No file selected'}
-                    </strong>
-
-                    <span>
-                      {selectedFile
-                        ? 'Actual source code fetched from GitHub.'
-                        : 'Choose a file to explore its contents.'}
-                    </span>
-                  </p>
-                </div>
-
-                <div className="file-point">
-                  <span className="point-dot blue" />
-
-                  <p>
-                    <strong>Part of {repositoryName}</strong>
-
-                    <span>
-                      Connected GitHub repository.
-                    </span>
-                  </p>
-                </div>
-              </div>
-
-
-              <div className="explanation-footnote">
-                <Info size={14} />
-
-                <span>
-                  AI-powered explanations will be connected later.
-                </span>
-              </div>
-
-            </div>
-
-
-            <button
-              className="ask-about-file"
-              onClick={() => navigate('/chat')}
-            >
-              <Sparkles size={14} />
-              Ask about this file
-            </button>
-
-          </aside>
-
+          <RepositoryChat
+            repositoryName={repositoryName}
+            selectedFile={selectedFile}
+            width={chatWidth}
+            onClose={() => setExplanationOpen(false)}
+          />
         ) : (
           <button
             className="reopen-explainer"
             onClick={() => setExplanationOpen(true)}
           >
             <Sparkles size={15} />
-            Show explanation
+            Show AI Chat
           </button>
         )}
 

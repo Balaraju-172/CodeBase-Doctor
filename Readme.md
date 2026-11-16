@@ -18,3 +18,30 @@ For the MVP, that's fine. Later we'll improve large-repository handling.
 
 
 Bro, React + Vite project kabatti process.env use cheyyakudadhu. Vite lo import.meta.env use cheyyali.
+
+
+
+
+
+to understand code structure
+to understand flow
+bug detection 
+debug
+
+
+
+Why is it a real-world project?
+Imagine you join a company as a MERN developer.
+
+Your team gives you an existing project containing 500+ files.
+
+Your manager says:
+
+"Add a payment feature to this application."
+
+Now you need to understand:
+- Where is the existing authentication implemented?
+- Which API handles user operations?
+- Which database models are involved?
+- Which frontend components need changes?
+- Will your changes affect other modules?
