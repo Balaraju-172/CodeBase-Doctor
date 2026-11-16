@@ -1,15 +1,10 @@
 
 import * as ts from 'typescript';
 
-// Import TypeScript Compiler API.
-// It helps us convert JavaScript/TypeScript code into an AST.
-
 export const analyzeCode = (content, filePath) => {
-
-  // Get the file extension: js, jsx, ts, or tsx.
+  // Step 1: Identify file extension
   const extension = filePath.split('.').pop().toLowerCase();
 
-  // Select the parser mode based on the file extension.
   let scriptKind = ts.ScriptKind.JS;
 
   if (extension === 'jsx') {
@@ -20,8 +15,7 @@ export const analyzeCode = (content, filePath) => {
     scriptKind = ts.ScriptKind.TSX;
   }
 
-  // Convert the source code into an Abstract Syntax Tree (AST).
-  // AST represents code as a structured tree of nodes.
+  // Step 2: Convert source code into AST
   const sourceFile = ts.createSourceFile(
     filePath,
     content,
@@ -30,26 +24,26 @@ export const analyzeCode = (content, filePath) => {
     scriptKind
   );
 
-  // Store the analysis results.
   let functionsFound = 0;
-
-  // Number of import statements.
   let importsFound = 0;
-
-  // Number of individual imported items.
   let importedBindingsFound = 0;
-
-  // Number of export statements/declarations.
   let exportsFound = 0;
 
-  // Store issues detected in this file.
   const potentialIssues = [];
 
-  // Visit every node in the AST recursively.
+  // Helper: Get line number for an AST node
+  const getLine = (node) => {
+    const { line } = sourceFile.getLineAndCharacterOfPosition(
+      node.getStart(sourceFile)
+    );
+
+    return line + 1;
+  };
+
+  // Step 3: Visit AST nodes
   const visit = (node) => {
 
-    // Count function declarations, function expressions,
-    // arrow functions, methods, constructors and getters/setters.
+    // Count functions
     if (
       ts.isFunctionDeclaration(node) ||
       ts.isFunctionExpression(node) ||
@@ -62,106 +56,127 @@ export const analyzeCode = (content, filePath) => {
       functionsFound++;
     }
 
-    // Check whether the current AST node is an import statement.
+    // Count imports
     if (ts.isImportDeclaration(node)) {
-
-      // Count one import statement.
       importsFound++;
 
-      // Get the imported items from this statement.
       const importClause = node.importClause;
 
       if (importClause) {
-
-        // Count default imports.
-        // Example: import express from 'express'
         if (importClause.name) {
           importedBindingsFound++;
         }
 
-        // Check for named imports or namespace imports.
         if (importClause.namedBindings) {
-
-          // Named imports:
-          // import { useState, useEffect } from 'react'
           if (ts.isNamedImports(importClause.namedBindings)) {
             importedBindingsFound +=
               importClause.namedBindings.elements.length;
-          }
-
-          // Namespace import:
-          // import * as React from 'react'
-          else if (ts.isNamespaceImport(importClause.namedBindings)) {
+          } else if (
+            ts.isNamespaceImport(importClause.namedBindings)
+          ) {
             importedBindingsFound++;
           }
         }
       }
     }
 
-    // Count export declarations and export assignments.
+    // Count exports
     if (
       ts.isExportDeclaration(node) ||
       ts.isExportAssignment(node) ||
       (
         ts.canHaveModifiers(node) &&
         ts.getModifiers(node)?.some(
-          (modifier) => modifier.kind === ts.SyntaxKind.ExportKeyword
+          (modifier) =>
+            modifier.kind === ts.SyntaxKind.ExportKeyword
         )
       )
     ) {
       exportsFound++;
     }
 
-    // Detect empty catch blocks.
-    // Empty catch blocks may silently ignore errors.
+    // Rule 1: Empty catch block
     if (
       ts.isCatchClause(node) &&
       node.block.statements.length === 0
     ) {
-
-      // Get the line number where the catch block starts.
-      const { line } = sourceFile.getLineAndCharacterOfPosition(
-        node.getStart(sourceFile)
-      );
-
       potentialIssues.push({
         type: 'empty-catch-block',
+        severity: 'medium',
         message: 'Empty catch block found. Errors may be silently ignored.',
-        line: line + 1
+        line: getLine(node)
       });
     }
 
-    // Continue visiting child nodes.
+    // Rule 2: Debugger statement
+    if (ts.isDebuggerStatement(node)) {
+      potentialIssues.push({
+        type: 'debugger-statement',
+        severity: 'medium',
+        message: 'Debugger statement found. Remove it before production.',
+        line: getLine(node)
+      });
+    }
+
+    // Rule 3: Console method calls
+    if (
+      ts.isCallExpression(node) &&
+      ts.isPropertyAccessExpression(node.expression) &&
+      ts.isIdentifier(node.expression.expression) &&
+      node.expression.expression.text === 'console'
+    ) {
+      potentialIssues.push({
+        type: 'console-statement',
+        severity: 'low',
+        message: `Console.${node.expression.name.text}() call found. Check whether this debug log is needed.`,
+        line: getLine(node)
+      });
+    }
+
+    // Rule 4: var declarations
+    if (
+      ts.isVariableDeclarationList(node) &&
+      (node.flags & ts.NodeFlags.Var) !== 0
+    ) {
+      potentialIssues.push({
+        type: 'var-usage',
+        severity: 'low',
+        message: 'var declaration found. Consider using let or const.',
+        line: getLine(node)
+      });
+    }
+
+    // Visit child nodes
     ts.forEachChild(node, visit);
   };
 
-  // Start AST traversal from the root node.
+  // Start traversal
   visit(sourceFile);
 
-  // Get syntax errors reported by the TypeScript parser.
-  const syntaxErrors = sourceFile.parseDiagnostics.map((diagnostic) => {
+  // Step 4: Detect syntax errors
+  const syntaxErrors = sourceFile.parseDiagnostics.map(
+    (diagnostic) => {
+      const position = diagnostic.start ?? 0;
 
-    // Find the position of the syntax error.
-    const position = diagnostic.start ?? 0;
+      const { line, character } =
+        sourceFile.getLineAndCharacterOfPosition(position);
 
-    const { line, character } =
-      sourceFile.getLineAndCharacterOfPosition(position);
+      return {
+        type: 'syntax-error',
+        severity: 'high',
+        message: ts.flattenDiagnosticMessageText(
+          diagnostic.messageText,
+          '\n'
+        ),
+        line: line + 1,
+        column: character + 1
+      };
+    }
+  );
 
-    return {
-      type: 'syntax-error',
-      message: ts.flattenDiagnosticMessageText(
-        diagnostic.messageText,
-        '\n'
-      ),
-      line: line + 1,
-      column: character + 1
-    };
-  });
-
-  // Add syntax errors to the list of potential issues.
   potentialIssues.push(...syntaxErrors);
 
-  // Return all analysis results for this file.
+  // Step 5: Return analysis results
   return {
     filePath,
     functionsFound,

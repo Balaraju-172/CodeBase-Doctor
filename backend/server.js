@@ -1,11 +1,17 @@
 import 'dotenv/config';
 import express from 'express';
-
+import cors from 'cors';
 
 import dashboardRoutes from './src/routes/dashboard.routes.js';
 import repositoryRoutes from './src/routes/repository.routes.js';
 
 const app = express();
+
+// Allow requests from React frontend
+app.use(cors({
+  origin: 'http://localhost:5173'
+}));
+
 app.use(express.json());
 
 const port = Number(process.env.PORT) || 3001;

@@ -1,12 +1,51 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { Activity, ArrowRight, ArrowUpRight, Bug, CheckCircle2, FileCode2, Plus, Search, Sparkles } from 'lucide-react';
 import { Link } from 'react-router-dom';
 import { activities, repositories } from '../data/sampleData';
 import { PageHeader, RepositoryCard, StatCard, StatusBadge } from '../components/UI';
 
+
+// API_BASE_URL is currently not defined.
+// Add this before export default function Dashboard():
+
+const API_BASE_URL = import.meta.env.API_BASE_URL || 'http://localhost:3001';
+
 export default function Dashboard() {
   const [query, setQuery] = useState('');
-  const filteredRepositories = repositories.filter((repo) => `${repo.owner}/${repo.name} ${repo.language}`.toLowerCase().includes(query.toLowerCase()));
+  const [stats, setStats] = useState(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState(null);
+
+  useEffect(() => {
+    const fetchDashboardStats = async () => {
+      try {
+        const response = await fetch(
+          `${API_BASE_URL}/api/dashboard/stats`
+        );
+
+        if (!response.ok) {
+          throw new Error('Failed to fetch dashboard statistics');
+        }
+
+        const result = await response.json();
+
+        if (!result.success) {
+          throw new Error(result.message || 'Something went wrong');
+        }
+
+        setStats(result.data);
+      } catch (error) {
+        setError(error.message);
+      } finally {
+        setLoading(false);
+      }
+    };
+
+    fetchDashboardStats();
+  }, []);
+
+  const filteredRepositories = 
+  repositories.filter((repo) => `${repo.owner}/${repo.name} ${repo.language}`.toLowerCase().includes(query.toLowerCase()));
 
   return (
     <div className="page-wrap">
@@ -25,10 +64,10 @@ export default function Dashboard() {
       </section>
 
       <section className="stats-grid">
-        <StatCard label="Total repositories" value="12" change="+2 this month" icon={Activity} tone="purple" />
-        <StatCard label="Files analyzed" value="2,481" change="+186 this week" icon={FileCode2} tone="blue" />
-        <StatCard label="Potential bugs" value="11" change="4 need attention" icon={Bug} tone="orange" />
-        <StatCard label="Completed analyses" value="38" change="94% success rate" icon={CheckCircle2} tone="green" />
+        <StatCard label="Total repositories" value={stats?.totalRepositories} change="+2 this month" icon={Activity} tone="purple" />
+        <StatCard label="Files analyzed" value={stats?.filesAnalyzed} change="+186 this week" icon={FileCode2} tone="blue" />
+        <StatCard label="Potential bugs" value={stats?.potentialBugs} change="4 need attention" icon={Bug} tone="orange" />
+        <StatCard label="Completed analyses" value={stats?.completedAnalyses} change="94% success rate" icon={CheckCircle2} tone="green" />
       </section>
 
       <section className="dashboard-lower">
