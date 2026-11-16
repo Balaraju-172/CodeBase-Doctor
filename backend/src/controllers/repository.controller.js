@@ -1,5 +1,6 @@
 import { analyzeCode } from '../utils/codeAnalyzer.js';
-
+import { analyzeDependencies } from '../utils/dependencyAnalyzer.js';
+import path from 'node:path';
 export const connectRepository = (req, res) => {
   try {
     const { repoUrl } = req.body;
@@ -467,3 +468,242 @@ export const analyzeRepository = async (req, res) => {
     });
   }
 };
+
+
+
+
+
+
+
+
+const resolveLocalDependency = (
+  sourceFile,
+  specifier,
+  availableFiles
+) => {
+  // Convert relative import into repository-relative path
+  const basePath = path.posix.normalize(
+    path.posix.join(path.posix.dirname(sourceFile), specifier)
+  );
+
+  const candidates = [basePath];
+
+  // Check common extensions if import has no extension
+  if (!path.posix.extname(basePath)) {
+    const extensions = ['.js', '.jsx', '.ts', '.tsx'];
+
+    for (const extension of extensions) {
+      candidates.push(`${basePath}${extension}`);
+    }
+
+    for (const extension of extensions) {
+      candidates.push(`${basePath}/index${extension}`);
+    }
+  }
+
+  return (
+    candidates.find((candidate) => availableFiles.has(candidate)) || null
+  );
+};
+
+
+// Repository Dependency Analysis API
+export const getRepositoryDependencies = async (req, res) => {
+  try {
+    const { owner, repo } = req.params;
+
+    // Step 1: Fetch repository details
+    const repoResponse = await fetch(
+      `https://api.github.com/repos/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}`,
+      {
+        headers: {
+          Accept: 'application/vnd.github+json',
+          Authorization: `Bearer ${process.env.GITHUB_TOKEN}`
+        }
+      }
+    );
+
+    if (!repoResponse.ok) {
+      return res.status(repoResponse.status).json({
+        success: false,
+        message: 'Failed to fetch repository details',
+        error: await repoResponse.text()
+      });
+    }
+
+    const repoData = await repoResponse.json();
+    const branch = repoData.default_branch;
+
+    // Step 2: Fetch repository tree
+    const treeResponse = await fetch(
+      `https://api.github.com/repos/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/git/trees/${encodeURIComponent(branch)}?recursive=1`,
+      {
+        headers: {
+          Accept: 'application/vnd.github+json',
+          Authorization: `Bearer ${process.env.GITHUB_TOKEN}`
+        }
+      }
+    );
+
+    if (!treeResponse.ok) {
+      return res.status(treeResponse.status).json({
+        success: false,
+        message: 'Failed to fetch repository tree',
+        error: await treeResponse.text()
+      });
+    }
+
+    const treeData = await treeResponse.json();
+
+    // Step 3: Select supported source files
+    const supportedExtensions = ['.js', '.jsx', '.ts', '.tsx'];
+
+    const excludedFolders = [
+      'node_modules',
+      'dist',
+      'build',
+      '.next',
+      'coverage'
+    ];
+
+    const selectedFiles = treeData.tree
+      .filter((item) => {
+        const hasSupportedExtension = supportedExtensions.some(
+          (extension) => item.path.endsWith(extension)
+        );
+
+        const isExcluded = item.path
+          .split('/')
+          .some((folder) => excludedFolders.includes(folder));
+
+        return (
+          item.type === 'blob' &&
+          hasSupportedExtension &&
+          !isExcluded &&
+          item.size <= 1024 * 1024
+        );
+      })
+      .slice(0, 20);
+
+    // Step 4: Fetch file content and extract dependencies
+    const fileResults = [];
+
+    for (const file of selectedFiles) {
+      const fileResponse = await fetch(
+        `https://api.github.com/repos/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/contents/${file.path
+          .split('/')
+          .map(encodeURIComponent)
+          .join('/')}`,
+        {
+          headers: {
+            Accept: 'application/vnd.github+json',
+            Authorization: `Bearer ${process.env.GITHUB_TOKEN}`
+          }
+        }
+      );
+
+      if (!fileResponse.ok) {
+        console.log(
+          `Failed to fetch ${file.path}:`,
+          fileResponse.status
+        );
+        continue;
+      }
+
+      const fileData = await fileResponse.json();
+
+      if (
+        fileData.type !== 'file' ||
+        fileData.encoding !== 'base64' ||
+        !fileData.content
+      ) {
+        continue;
+      }
+
+      const content = Buffer
+        .from(fileData.content.replace(/\s/g, ''), 'base64')
+        .toString('utf-8');
+
+      const analysis = analyzeDependencies(content, file.path);
+
+      fileResults.push(analysis);
+    }
+
+    // Step 5: Store available repository file paths
+    const availableFiles = new Set(
+      fileResults.map((file) => file.filePath)
+    );
+
+    // Step 6: Resolve local dependencies
+    const dependencies = fileResults.map((file) => {
+      const resolvedDependencies = file.dependencies.map((dependency) => {
+        if (dependency.type === 'external') {
+          return {
+            ...dependency,
+            resolvedPath: null
+          };
+        }
+
+        const resolvedPath = resolveLocalDependency(
+          file.filePath,
+          dependency.specifier,
+          availableFiles
+        );
+
+        return {
+          ...dependency,
+          resolvedPath
+        };
+      });
+
+      return {
+        filePath: file.filePath,
+        dependenciesFound: resolvedDependencies.length,
+        dependencies: resolvedDependencies
+      };
+    });
+
+    // Step 7: Calculate summary
+    const allDependencies = dependencies.flatMap(
+      (file) => file.dependencies
+    );
+
+    const summary = {
+      analyzedFiles: dependencies.length,
+      totalDependencies: allDependencies.length,
+
+      localDependencies: allDependencies.filter(
+        (item) => item.type === 'local'
+      ).length,
+
+      externalDependencies: allDependencies.filter(
+        (item) => item.type === 'external'
+      ).length,
+
+      unresolvedLocalDependencies: allDependencies.filter(
+        (item) => item.type === 'local' && !item.resolvedPath
+      ).length
+    };
+
+    // Step 8: Send response
+    return res.status(200).json({
+      success: true,
+      message: 'Dependency analysis completed',
+      data: {
+        repository: repoData.full_name,
+        branch,
+        summary,
+        dependencies
+      }
+    });
+
+  } catch (error) {
+    console.error('Dependency Analysis Error:', error);
+
+    return res.status(500).json({
+      success: false,
+      message: 'Internal server error'
+    });
+  }
+};
+
