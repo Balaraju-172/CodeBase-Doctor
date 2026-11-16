@@ -1,10 +1,14 @@
 import { analyzeCode } from '../utils/codeAnalyzer.js';
 import { analyzeDependencies } from '../utils/dependencyAnalyzer.js';
 import path from 'node:path';
-export const connectRepository = (req, res) => {
+
+
+
+export const connectRepository = async (req, res) => {
   try {
     const { repoUrl } = req.body;
 
+    // Step 1: Check whether URL is provided
     if (!repoUrl) {
       return res.status(400).json({
         success: false,
@@ -12,12 +16,16 @@ export const connectRepository = (req, res) => {
       });
     }
 
+    // Step 2: Validate GitHub URL
     const url = new URL(repoUrl);
 
-    if (url.hostname !== 'github.com' || url.protocol !== 'https:') {
+    if (
+      url.hostname !== 'github.com' ||
+      url.protocol !== 'https:'
+    ) {
       return res.status(400).json({
         success: false,
-        message: 'Please provide a valid GitHub repository URL'
+        message: 'Please provide a valid GitHub URL'
       });
     }
 
@@ -33,13 +41,63 @@ export const connectRepository = (req, res) => {
     const owner = parts[0];
     const repo = parts[1].replace(/\.git$/, '');
 
+    // Step 3: Check repository using GitHub API
+    const githubResponse = await fetch(
+      `https://api.github.com/repos/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}`,
+      {
+        headers: {
+          Accept: 'application/vnd.github+json',
+          ...(process.env.GITHUB_TOKEN && {
+            Authorization: `Bearer ${process.env.GITHUB_TOKEN}`
+          })
+        }
+      }
+    );
+
+    // Step 4: Handle repository access errors
+    if (githubResponse.status === 404) {
+      return res.status(404).json({
+        success: false,
+        message: 'Repository not found or you do not have permission to access it'
+      });
+    }
+
+    if (githubResponse.status === 401) {
+      return res.status(401).json({
+        success: false,
+        message: 'Invalid GitHub token'
+      });
+    }
+
+    if (githubResponse.status === 403) {
+      return res.status(403).json({
+        success: false,
+        message: 'GitHub access denied or API rate limit exceeded'
+      });
+    }
+
+    if (!githubResponse.ok) {
+      return res.status(githubResponse.status).json({
+        success: false,
+        message: 'Unable to verify GitHub repository'
+      });
+    }
+
+    // Step 5: Get repository details
+    const repository = await githubResponse.json();
+
+    // Step 6: Send success response
     return res.status(200).json({
       success: true,
-      message: 'Repository URL received successfully',
+      message: 'Repository verified and access confirmed',
       data: {
         repoUrl,
         owner,
-        repo
+        repo,
+        fullName: repository.full_name,
+        private: repository.private,
+        defaultBranch: repository.default_branch,
+        access: 'granted'
       }
     });
 
@@ -214,8 +272,11 @@ export const getFileContent = async (req, res) => {
         .join('/')}`,
       {
         headers: {
-          Accept: 'application/vnd.github+json'
-        }
+            Accept: 'application/vnd.github+json',
+            ...(process.env.GITHUB_TOKEN && {
+            Authorization: `Bearer ${process.env.GITHUB_TOKEN}`
+      })
+    }
       }
     );
 

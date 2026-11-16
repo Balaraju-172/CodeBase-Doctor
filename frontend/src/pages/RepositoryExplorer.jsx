@@ -1,93 +1,753 @@
-import { useState } from 'react';
+
+import { useEffect, useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
-import { Activity, ChevronDown, ChevronRight, Circle, FileCode2, FileText, Folder, FolderOpen, GitBranch, Info, MoreHorizontal, PanelRightClose, Search, Sparkles, WandSparkles } from 'lucide-react';
+import "../styles.css";
+import {
+  Activity,
+  ChevronDown,
+  ChevronRight,
+  Circle,
+  FileCode2,
+  FileText,
+  Folder,
+  FolderOpen,
+  GitBranch,
+  Info,
+  MoreHorizontal,
+  PanelRightClose,
+  Search,
+  Sparkles,
+  WandSparkles
+} from 'lucide-react';
+
 import CodeViewer from '../components/CodeViewer';
-import { repositories, fileContents, fileTree } from '../data/sampleData';
 
-const fileDetails = {
-  'src/index.js': { type: 'Entry point', summary: 'Bootstraps the Express application, registers middleware and route modules, and opens the database connection before listening for requests.' },
-  'src/controllers/auth.controller.js': { type: 'Controller', summary: 'Translates incoming authentication requests into service calls. The login handler sets a protected session cookie and returns a short-lived access token.' },
-  'src/config/database.js': { type: 'Configuration', summary: 'Reads the database URL from the runtime environment and establishes a Mongoose connection. Startup fails fast when the connection string is missing.' },
-};
+const API_BASE_URL =
+  import.meta.env.VITE_API_URL || 'http://localhost:3001';
 
-const fallbacks = {
-  'auth.routes.js': ['import { Router } from "express";', 'import { login } from "../controllers/auth.controller.js";', '', 'const router = Router();', '', 'router.post("/login", login);', '', 'export default router;'],
-  'project.routes.js': ['import { Router } from "express";', 'import { requireAuth } from "../middleware/requireAuth.js";', '', 'const router = Router();', 'router.use(requireAuth);', 'router.get("/", listProjects);', '', 'export default router;'],
-  'requireAuth.js': ['export function requireAuth(req, res, next) {', '  const token = req.cookies?.session;', '', '  if (!token) {', '    return res.status(401).json({ error: "Unauthorized" });', '  }', '', '  return next();', '}'],
-  'User.js': ['import mongoose from "mongoose";', '', 'const userSchema = new mongoose.Schema({', '  email: { type: String, required: true, unique: true },', '  passwordHash: { type: String, required: true },', '}, { timestamps: true });', '', 'export default mongoose.model("User", userSchema);'],
-  'auth.service.js': ['export const AuthService = {', '  async login(email, password) {', '    const user = await User.findOne({ email });', '    if (!user || !(await verifyPassword(password, user.passwordHash))) {', '      throw new Error("Invalid credentials");', '    }', '    return createSession(user);', '  },', '};'],
-};
+
+// Convert GitHub flat file paths into nested folders
+function buildFileTree(files) {
+  const root = [];
+  const folderMap = new Map();
+
+  files.forEach((file) => {
+    const parts = file.path.split('/');
+    let currentLevel = root;
+    let currentPath = '';
+
+    parts.forEach((part, index) => {
+      currentPath = currentPath
+        ? `${currentPath}/${part}`
+        : part;
+
+      const isLast = index === parts.length - 1;
+      const isFolder = !isLast || file.type === 'folder';
+
+      if (isFolder) {
+        let folder = folderMap.get(currentPath);
+
+        if (!folder) {
+          folder = {
+            name: part,
+            path: currentPath,
+            type: 'folder',
+            children: []
+          };
+
+          folderMap.set(currentPath, folder);
+          currentLevel.push(folder);
+        }
+
+        currentLevel = folder.children;
+      } else {
+        currentLevel.push({
+          name: part,
+          path: currentPath,
+          type: 'file'
+        });
+      }
+    });
+  });
+
+  return root;
+}
+
+
+// Detect programming language using file extension
+function getLanguage(filePath = '') {
+  const extension = filePath.split('.').pop().toLowerCase();
+
+  const languages = {
+    js: 'javascript',
+    jsx: 'javascript',
+    ts: 'typescript',
+    tsx: 'typescript',
+    py: 'python',
+    java: 'java',
+    css: 'css',
+    html: 'html',
+    json: 'json',
+    md: 'markdown',
+    xml: 'xml',
+    sql: 'sql',
+    yml: 'yaml',
+    yaml: 'yaml',
+    sh: 'bash'
+  };
+
+  return languages[extension] || 'text';
+}
+
 
 export default function RepositoryExplorer() {
-  const { id } = useParams();
+  const { owner, repo } = useParams();
   const navigate = useNavigate();
-  const repo = repositories.find((item) => item.id === id) || repositories[0];
-  const [selectedFile, setSelectedFile] = useState('src/index.js');
-  const [expanded, setExpanded] = useState(() => new Set(['src', 'config']));
+
+  // Repository information
+  const [repoDetails, setRepoDetails] = useState(null);
+
+  // Repository file tree
+  const [treeItems, setTreeItems] = useState([]);
+
+  // Multiple opened files
+  const [openFiles, setOpenFiles] = useState([]);
+
+  // Active file
+  const [selectedFile, setSelectedFile] = useState(null);
+
+  // Loading and error states
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState(null);
+
+  // Existing UI states
+  const [expanded, setExpanded] = useState(
+    () => new Set(['backend', 'frontend'])
+  );
+
   const [treeSearch, setTreeSearch] = useState('');
   const [explanationOpen, setExplanationOpen] = useState(true);
 
-  const lines = fileContents[selectedFile] || fallbacks[selectedFile.split('/').pop()] || ['// Sample source file', '// Select another file to explore the demo repository.'];
-  const details = fileDetails[selectedFile] || { type: 'Source file', summary: 'This file is part of the sample MERN application. Explore neighboring files to understand how routes, middleware, services, and configuration fit together.' };
 
-  function toggleFolder(name) {
+  // API 1: Repository details
+  // API 2: Repository tree
+  useEffect(() => {
+    const controller = new AbortController();
+
+    async function fetchRepository() {
+      try {
+        setLoading(true);
+        setError(null);
+
+        // Fetch repository details
+        const detailsResponse = await fetch(
+          `${API_BASE_URL}/api/repositories/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}`,
+          { signal: controller.signal }
+        );
+
+        const detailsResult = await detailsResponse.json();
+
+        if (!detailsResponse.ok || !detailsResult.success) {
+          throw new Error(
+            detailsResult.message || 'Failed to fetch repository details'
+          );
+        }
+
+        setRepoDetails(detailsResult.data);
+
+
+        // Fetch repository file tree
+        const treeResponse = await fetch(
+          `${API_BASE_URL}/api/repositories/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/tree`,
+          { signal: controller.signal }
+        );
+
+        const treeResult = await treeResponse.json();
+
+        if (!treeResponse.ok || !treeResult.success) {
+          throw new Error(
+            treeResult.message || 'Failed to fetch repository tree'
+          );
+        }
+
+        // Convert flat paths into nested folders
+        setTreeItems(buildFileTree(treeResult.data.files));
+
+      } catch (err) {
+        if (err.name !== 'AbortError') {
+          console.error('Repository loading error:', err);
+          setError(err.message);
+        }
+      } finally {
+        if (!controller.signal.aborted) {
+          setLoading(false);
+        }
+      }
+    }
+
+    if (owner && repo) {
+      fetchRepository();
+    }
+
+    return () => controller.abort();
+
+  }, [owner, repo]);
+
+
+  // API 3: Fetch actual file content
+  async function handleFileSelect(path) {
+    console.log(`Fetching content for file: ${path}`);
+    // Check whether file is already open
+    const existingFile = openFiles.find(
+      (file) => file.path === path
+    );
+
+    // If already open, activate its tab
+    if (existingFile) {
+      setSelectedFile(path);
+      return;
+    }
+
+    // Open new tab immediately with loading state
+    setSelectedFile(path);
+
+    setOpenFiles((current) => [
+      ...current,
+      {
+        path,
+        content: '',
+        loading: true,
+        error: null
+      }
+    ]);
+
+    try {
+      const query = new URLSearchParams({ path });
+
+      const response = await fetch(
+        `${API_BASE_URL}/api/repositories/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/files?${query}`
+      );
+
+      const result = await response.json();
+
+      if (!response.ok || !result.success) {
+        throw new Error(
+          result.message || 'Failed to fetch file content'
+        );
+      }
+
+      // Update only the matching tab
+      setOpenFiles((current) =>
+        current.map((file) =>
+          file.path === path
+            ? {
+                ...file,
+                content: result.data.content,
+                loading: false,
+                error: null
+              }
+            : file
+        )
+      );
+
+    } catch (err) {
+      console.error('File content error:', err);
+
+      setOpenFiles((current) =>
+        current.map((file) =>
+          file.path === path
+            ? {
+                ...file,
+                loading: false,
+                error: err.message
+              }
+            : file
+        )
+      );
+    }
+  }
+
+
+  // Close an editor tab
+  function closeFile(path) {
+    const remainingFiles = openFiles.filter(
+      (file) => file.path !== path
+    );
+
+    setOpenFiles(remainingFiles);
+
+    // If active tab is closed, select another open tab
+    if (selectedFile === path) {
+      setSelectedFile(
+        remainingFiles.length > 0
+          ? remainingFiles[remainingFiles.length - 1].path
+          : null
+      );
+    }
+  }
+
+
+  // Get currently active file
+  const activeFile = openFiles.find(
+    (file) => file.path === selectedFile
+  );
+
+  // Convert actual source content into lines
+  const lines = activeFile?.content !== undefined &&
+    activeFile?.content !== ''
+    ? activeFile.content.split('\n')
+    : activeFile?.content === ''
+      ? []
+      : [];
+
+  const fileName =
+    selectedFile?.split('/').pop() || 'Select a file';
+
+  const language = getLanguage(selectedFile || '');
+
+  const fileLoading = activeFile?.loading || false;
+  const fileError = activeFile?.error || null;
+
+
+  // File explanation information
+  const details = {
+    type: selectedFile
+      ? `${language.toUpperCase()} SOURCE FILE`
+      : 'REPOSITORY EXPLORER',
+
+    summary: selectedFile
+      ? `Viewing the actual source code of ${fileName} from the connected GitHub repository.`
+      : 'Select a file from the explorer to view its source code.'
+  };
+
+
+  // Expand or collapse folders
+  function toggleFolder(path) {
     setExpanded((current) => {
       const next = new Set(current);
-      if (next.has(name)) next.delete(name);
-      else next.add(name);
+
+      if (next.has(path)) {
+        next.delete(path);
+      } else {
+        next.add(path);
+      }
+
       return next;
     });
   }
 
-  function renderTree(items, prefix = '') {
-    return items.filter((item) => `${prefix}${item.name}`.toLowerCase().includes(treeSearch.toLowerCase()) || item.type === 'folder').map((item) => {
-      const path = prefix ? `${prefix}/${item.name}` : item.name;
-      const open = expanded.has(path);
-      if (item.type === 'folder') {
-        return <div key={path}>
-          <button className="tree-item folder-item" onClick={() => toggleFolder(path)}>{open ? <ChevronDown size={14} /> : <ChevronRight size={14} />}{open ? <FolderOpen size={15} /> : <Folder size={15} />}<span>{item.name}</span></button>
-          {open && <div className="tree-children">{renderTree(item.children, path)}</div>}
-        </div>;
-      }
-      return <button key={path} className={`tree-item file-item ${selectedFile === path ? 'selected' : ''}`} onClick={() => setSelectedFile(path)}><FileCode2 size={14} /><span>{item.name}</span></button>;
-    });
+
+  // Render repository folders and files
+  function renderTree(items) {
+    return items
+      .filter((item) =>
+        item.name.toLowerCase().includes(treeSearch.toLowerCase()) ||
+        item.type === 'folder'
+      )
+      .map((item) => {
+        const open = expanded.has(item.path);
+
+        if (item.type === 'folder') {
+          return (
+            <div key={item.path}>
+              <button
+                className="tree-item folder-item"
+                onClick={() => toggleFolder(item.path)}
+              >
+                {open
+                  ? <ChevronDown size={14} />
+                  : <ChevronRight size={14} />}
+
+                {open
+                  ? <FolderOpen size={15} />
+                  : <Folder size={15} />}
+
+                <span>{item.name}</span>
+              </button>
+
+              {open && (
+                <div className="tree-children">
+                  {renderTree(item.children)}
+                </div>
+              )}
+            </div>
+          );
+        }
+
+        return (
+          <button
+            key={item.path}
+            className={`tree-item file-item ${
+              selectedFile === item.path ? 'selected' : ''
+            }`}
+            onClick={() => handleFileSelect(item.path)}
+          >
+            <FileCode2 size={14} />
+            <span>{item.name}</span>
+          </button>
+        );
+      });
   }
+
+
+  // Repository loading screen
+  if (loading) {
+    return (
+      <div className="explorer-page">
+        Loading repository...
+      </div>
+    );
+  }
+
+
+  // Repository error screen
+  if (error) {
+    return (
+      <div className="explorer-page">
+        <p>Failed to load repository: {error}</p>
+
+        <button onClick={() => navigate('/connect')}>
+          Back to repositories
+        </button>
+      </div>
+    );
+  }
+
+
+  const repositoryName = repoDetails?.name || repo;
+  const branch = repoDetails?.defaultBranch || 'main';
+
 
   return (
     <div className="explorer-page">
+
+      {/* Repository heading */}
       <div className="explorer-heading">
-        <div><div className="explorer-breadcrumb"><span>Repositories</span><ChevronRight size={13} /><strong>{repo.name}</strong></div><h1>{repo.owner} <span>/</span> {repo.name}</h1></div>
-        <div className="explorer-meta"><span><GitBranch size={14} />main</span><span className="demo-label"><Circle size={7} fill="currentColor" />DEMO DATA</span></div>
+        <div>
+          <div className="explorer-breadcrumb">
+            <span>Repositories</span>
+            <ChevronRight size={13} />
+            <strong>{repositoryName}</strong>
+          </div>
+
+          <h1>
+            {owner} <span>/</span> {repositoryName}
+          </h1>
+        </div>
+
+        <div className="explorer-meta">
+          <span>
+            <GitBranch size={14} />
+            {branch}
+          </span>
+
+          <span className="demo-label">
+            <Circle size={7} fill="currentColor" />
+            LIVE REPOSITORY
+          </span>
+        </div>
       </div>
+
+
       <div className="explorer-workspace">
+
+        {/* LEFT: File explorer */}
         <aside className="explorer-files">
-          <div className="explorer-pane-heading"><span>EXPLORER</span><button aria-label="Explorer options"><MoreHorizontal size={16} /></button></div>
-          <div className="repo-root-row"><ChevronDown size={14} /><FolderOpen size={15} /><strong>{repo.name}</strong></div>
-          <label className="tree-search"><Search size={13} /><input placeholder="Find a file..." value={treeSearch} onChange={(event) => setTreeSearch(event.target.value)} aria-label="Find a file" /></label>
-          <div className="file-tree">{renderTree(fileTree)}</div>
-          <div className="tree-footer"><span><GitBranch size={12} />main</span><span><Activity size={12} />MERN</span></div>
+
+          <div className="explorer-pane-heading">
+            <span>EXPLORER</span>
+
+            <button aria-label="Explorer options">
+              <MoreHorizontal size={16} />
+            </button>
+          </div>
+
+          <div className="repo-root-row">
+            <ChevronDown size={14} />
+            <FolderOpen size={15} />
+            <strong>{repositoryName}</strong>
+          </div>
+
+          <label className="tree-search">
+            <Search size={13} />
+
+            <input
+              placeholder="Find a file..."
+              value={treeSearch}
+              onChange={(event) => setTreeSearch(event.target.value)}
+              aria-label="Find a file"
+            />
+          </label>
+
+          <div className="file-tree">
+            {renderTree(treeItems)}
+          </div>
+
+          <div className="tree-footer">
+            <span>
+              <GitBranch size={12} />
+              {branch}
+            </span>
+
+            <span>
+              <Activity size={12} />
+              {repoDetails?.language || 'Source'}
+            </span>
+          </div>
+
         </aside>
 
+
+        {/* CENTER: Code editor */}
         <section className="explorer-code">
-          <div className="file-tabs"><div className="file-tab active"><FileCode2 size={14} /><span>{selectedFile.split('/').pop()}</span><button aria-label="Close file tab">×</button></div><div className="tab-empty">{selectedFile}</div><button className="tab-more" aria-label="More file options"><MoreHorizontal size={16} /></button></div>
-          <div className="code-breadcrumb"><span>{repo.name}</span><ChevronRight size={12} />{selectedFile.split('/').map((part, index, list) => <span className="crumb-piece" key={`${part}-${index}`}>{part}{index < list.length - 1 && <ChevronRight size={12} />}</span>)}</div>
-          <CodeViewer lines={lines} />
-          <div className="code-statusbar"><span><GitBranch size={12} />main</span><span>UTF-8</span><span>JavaScript</span><span>Ln 1, Col 1</span></div>
+
+          {/* Multiple open file tabs */}
+          <div className="file-tabs">
+
+            {openFiles.map((file, index) => {
+  const name = file.path.split('/').pop();
+
+  return (
+    <div
+      key={file.path}
+      className={`file-tab ${
+        selectedFile === file.path ? 'active' : ''
+      }`}
+      draggable
+      onDragStart={(event) => {
+        event.dataTransfer.setData(
+          'text/plain',
+          String(index)
+        );
+        event.dataTransfer.effectAllowed = 'move';
+      }}
+      onDragOver={(event) => {
+        event.preventDefault();
+        event.dataTransfer.dropEffect = 'move';
+      }}
+      onDrop={(event) => {
+        event.preventDefault();
+
+        const draggedIndex = Number(
+          event.dataTransfer.getData('text/plain')
+        );
+
+        if (draggedIndex === index) return;
+
+        setOpenFiles((current) => {
+          const updated = [...current];
+
+          const [draggedFile] = updated.splice(
+            draggedIndex,
+            1
+          );
+
+          updated.splice(index, 0, draggedFile);
+
+          return updated;
+        });
+      }}
+    >
+      <div
+        className="file-tab-content"
+        onClick={() => setSelectedFile(file.path)}
+      >
+        <FileCode2 size={14} />
+        <span>{name}</span>
+      </div>
+
+      <button
+        aria-label={`Close ${name}`}
+        onClick={() => closeFile(file.path)}
+      >
+        ×
+      </button>
+    </div>
+  );
+})}
+
+            <button
+              className="tab-more"
+              aria-label="More file options"
+            >
+              <MoreHorizontal size={16} />
+            </button>
+
+          </div>
+
+
+          {/* File path breadcrumb */}
+          <div className="code-breadcrumb">
+            <span>{repositoryName}</span>
+
+            {selectedFile &&
+              selectedFile.split('/').map((part, index, list) => (
+                <span
+                  className="crumb-piece"
+                  key={`${part}-${index}`}
+                >
+                  {part}
+
+                  {index < list.length - 1 && (
+                    <ChevronRight size={12} />
+                  )}
+                </span>
+              ))
+            }
+          </div>
+
+
+          {/* Actual code viewer */}
+          {fileLoading ? (
+            <div className="code-viewer">
+              Loading file content...
+            </div>
+          ) : fileError ? (
+            <div className="code-viewer">
+              Failed to load file: {fileError}
+            </div>
+          ) : selectedFile ? (
+            <CodeViewer
+              lines={lines}
+              language={language}
+            />
+          ) : (
+            <div className="code-viewer">
+              Select a file from the left explorer to view its code.mm
+            </div>
+          )}
+
+
+          {/* Editor status bar */}
+          <div className="code-statusbar">
+            <span>
+              <GitBranch size={12} />
+              {branch}
+            </span>
+
+            <span>UTF-8</span>
+
+            <span>{language}</span>
+
+            <span>
+              Ln {lines.length}, Col 1
+            </span>
+          </div>
+
         </section>
 
-        {explanationOpen ? <aside className="explainer-pane">
-          <div className="explainer-header"><div><Sparkles size={15} /><span>CODE EXPLANATION</span></div><button aria-label="Close explanation panel" onClick={() => setExplanationOpen(false)}><PanelRightClose size={15} /></button></div>
-          <div className="explainer-content">
-            <div className="explain-file-icon"><FileText size={17} /></div>
-            <span className="eyebrow">{details.type.toUpperCase()}</span>
-            <h2>{selectedFile.split('/').pop()}</h2>
-            <span className="file-location">{selectedFile}</span>
-            <div className="explanation-callout"><span><WandSparkles size={14} />OVERVIEW</span><p>{details.summary}</p></div>
-            <div className="explanation-section"><h3>In this file</h3><div className="file-point"><span className="point-dot purple" /><p><strong>{lines.length} lines</strong><span>Sample code shown for interface demonstration.</span></p></div><div className="file-point"><span className="point-dot blue" /><p><strong>Part of the {repo.name} app</strong><span>Demo repository structure, not live source code.</span></p></div></div>
-            <div className="explanation-footnote"><Info size={14} /><span>Explanations are static sample content. No AI service is connected.</span></div>
-          </div>
-          <button className="ask-about-file" onClick={() => navigate('/chat')}><Sparkles size={14} />Ask about this file</button>
-        </aside> : <button className="reopen-explainer" onClick={() => setExplanationOpen(true)}><Sparkles size={15} />Show explanation</button>}
+
+        {/* RIGHT: Explanation panel */}
+        {explanationOpen ? (
+          <aside className="explainer-pane">
+
+            <div className="explainer-header">
+              <div>
+                <Sparkles size={15} />
+                <span>CODE EXPLANATION</span>
+              </div>
+
+              <button
+                aria-label="Close explanation panel"
+                onClick={() => setExplanationOpen(false)}
+              >
+                <PanelRightClose size={15} />
+              </button>
+            </div>
+
+
+            <div className="explainer-content">
+
+              <div className="explain-file-icon">
+                <FileText size={17} />
+              </div>
+
+              <span className="eyebrow">
+                {details.type}
+              </span>
+
+              <h2>{fileName}</h2>
+
+              <span className="file-location">
+                {selectedFile || 'Select a file'}
+              </span>
+
+              <div className="explanation-callout">
+                <span>
+                  <WandSparkles size={14} />
+                  OVERVIEW
+                </span>
+
+                <p>{details.summary}</p>
+              </div>
+
+
+              <div className="explanation-section">
+                <h3>In this file</h3>
+
+                <div className="file-point">
+                  <span className="point-dot purple" />
+
+                  <p>
+                    <strong>
+                      {selectedFile
+                        ? `${lines.length} lines`
+                        : 'No file selected'}
+                    </strong>
+
+                    <span>
+                      {selectedFile
+                        ? 'Actual source code fetched from GitHub.'
+                        : 'Choose a file to explore its contents.'}
+                    </span>
+                  </p>
+                </div>
+
+                <div className="file-point">
+                  <span className="point-dot blue" />
+
+                  <p>
+                    <strong>Part of {repositoryName}</strong>
+
+                    <span>
+                      Connected GitHub repository.
+                    </span>
+                  </p>
+                </div>
+              </div>
+
+
+              <div className="explanation-footnote">
+                <Info size={14} />
+
+                <span>
+                  AI-powered explanations will be connected later.
+                </span>
+              </div>
+
+            </div>
+
+
+            <button
+              className="ask-about-file"
+              onClick={() => navigate('/chat')}
+            >
+              <Sparkles size={14} />
+              Ask about this file
+            </button>
+
+          </aside>
+
+        ) : (
+          <button
+            className="reopen-explainer"
+            onClick={() => setExplanationOpen(true)}
+          >
+            <Sparkles size={15} />
+            Show explanation
+          </button>
+        )}
+
       </div>
     </div>
   );

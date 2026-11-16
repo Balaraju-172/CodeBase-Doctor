@@ -13,7 +13,10 @@ export default function App() {
         <Route index element={<Navigate to="/dashboard" replace />} />
         <Route path="/dashboard" element={<Dashboard />} />
         <Route path="/connect" element={<ConnectRepository />} />
-        <Route path="/repositories/:id" element={<RepositoryExplorer />} />
+        <Route
+            path="/repositories/:owner/:repo"
+            element={<RepositoryExplorer />}
+        />      
         <Route path="/chat" element={<Chat />} />
         <Route path="/bugs" element={<BugReports />} />
         <Route path="/settings" element={<PlaceholderPage />} />

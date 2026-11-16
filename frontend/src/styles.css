@@ -609,3 +609,257 @@ a { color: inherit; text-decoration: none; }
   .tree-children { padding-left: 8px; }
   .tree-item { gap: 4px; padding-inline: 3px; font-size: 8px; }
 }
+/* Main explorer layout */
+.explorer-workspace {
+  display: flex;
+  min-height: 0;
+  height: 600px; /* Keep temporarily for testing */
+  overflow: hidden;
+}
+
+/* Left file explorer */
+.explorer-files {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  overflow: hidden;
+}
+
+/* File tree gets its own scrolling area */
+.file-tree {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  overflow-x: hidden;
+}
+
+/* Middle code editor */
+.explorer-code {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-width: 0;
+  min-height: 0;
+  overflow: hidden;
+}
+
+/* Top tabs stay fixed */
+.file-tabs {
+  display: flex;
+  flex-shrink: 0;
+  overflow-x: auto;
+  overflow-y: hidden;
+}
+
+/* Breadcrumb stays fixed */
+.code-breadcrumb {
+  flex-shrink: 0;
+}
+/* Actual code display area */
+.code-viewer {
+  display: flex;
+  flex: 1 1 0;
+  min-height: 0;
+  min-width: 0;
+  overflow: auto;
+  align-items: stretch;
+}
+
+/* Line numbers */
+.code-gutter {
+  display: flex;
+  flex-direction: column;
+  flex-shrink: 0;
+  align-self: flex-start;
+}
+
+/* Actual source code */
+.code-content {
+  flex: 0 0 auto;
+  display: block;
+  width: max-content;
+  min-width: 100%;
+  margin: 0;
+  white-space: pre;
+  overflow: visible;
+}
+/* Bottom status bar stays fixed */
+.code-statusbar {
+  flex-shrink: 0;
+}
+
+/* Custom dark scrollbar */
+.code-viewer::-webkit-scrollbar,
+.file-tree::-webkit-scrollbar,
+.file-tabs::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+
+.code-viewer::-webkit-scrollbar-track,
+.file-tree::-webkit-scrollbar-track,
+.file-tabs::-webkit-scrollbar-track {
+  background: #111827;
+  border-radius: 10px;
+}
+
+.code-viewer::-webkit-scrollbar-thumb,
+.file-tree::-webkit-scrollbar-thumb,
+.file-tabs::-webkit-scrollbar-thumb {
+  background: #374151;
+  border-radius: 10px;
+}
+
+.code-viewer::-webkit-scrollbar-thumb:hover,
+.file-tree::-webkit-scrollbar-thumb:hover,
+.file-tabs::-webkit-scrollbar-thumb:hover {
+  background: #4b5563;
+}
+
+/* Firefox */
+.code-viewer,
+.file-tree,
+.file-tabs {
+  scrollbar-width: thin;
+  scrollbar-color: #374151 #111827;
+}
+
+/* Main repository explorer */
+.explorer-page {
+  display: flex;
+  flex-direction: column;
+  height: calc(100vh - 120px);
+  min-height: 0;
+  overflow: hidden;
+}
+
+/* Repository heading should stay fixed */
+.explorer-heading {
+  flex-shrink: 0;
+}
+
+/* Workspace takes remaining available height */
+.explorer-workspace {
+  display: flex;
+  flex: 1;
+  min-height: 0;
+  overflow: hidden;
+}
+
+/* Left sidebar */
+.explorer-files {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  overflow: hidden;
+}
+
+/* Keep top and bottom sections fixed */
+.explorer-pane-heading,
+.repo-root-row,
+.tree-search,
+.tree-footer {
+  flex-shrink: 0;
+}
+
+/* Only file and folder list scrolls */
+.file-tree {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  overflow-x: auto;
+  overscroll-behavior: contain;
+}
+
+/* Scrollbar styling */
+.file-tree {
+  scrollbar-width: thin;
+  scrollbar-color: #374151 #111827;
+}
+
+.file-tree::-webkit-scrollbar {
+  width: 8px;
+}
+
+.file-tree::-webkit-scrollbar-thumb {
+  background: #374151;
+  border-radius: 8px;
+}
+
+/* Hide scrollbar but keep scrolling enabled */
+.file-tree {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  overflow-x: auto;
+
+  /* Firefox */
+  scrollbar-width: none;
+
+  /* IE and old Edge */
+  -ms-overflow-style: none;
+}
+
+/* Chrome, Edge, Safari */
+.file-tree::-webkit-scrollbar {
+  display: none;
+  width: 0;
+  height: 0;
+}
+
+/* Hide scrollbar but preserve scrolling */
+.file-tree,
+.file-tabs,
+.code-viewer {
+  scrollbar-width: none;
+  -ms-overflow-style: none;
+}
+
+/* Chrome, Edge, Safari */
+.file-tree::-webkit-scrollbar,
+.file-tabs::-webkit-scrollbar,
+.code-viewer::-webkit-scrollbar {
+  display: none;
+  width: 0;
+  height: 0;
+}
+
+/* Left file tree */
+.file-tree {
+  overflow: auto;
+}
+
+/* Open file tabs - horizontal scroll */
+.file-tabs {
+  overflow-x: auto;
+  overflow-y: hidden;
+  white-space: nowrap;
+}
+
+/* Code content - vertical and horizontal scroll */
+.code-viewer {
+  overflow: auto;
+}
+
+.file-tab {
+  display: flex;
+  align-items: center;
+  flex-shrink: 0;
+  cursor: grab;
+  user-select: none;
+}
+
+.file-tab:active {
+  cursor: grabbing;
+}
+
+.file-tab-content {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  cursor: pointer;
+}
+
+.file-tab button {
+  cursor: pointer;
+}
